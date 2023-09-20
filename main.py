@@ -140,13 +140,11 @@ async def reupload_fb_file(
         if length > 25_000_000: # 25 MiB being maximum upload size for Discord
             return None
 
-        data = await resp.read()
+        attachment_data = await resp.read()
 
     while True:
-        io = BytesIO(data)
-
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
+        form_data.add_field("files[0]", attachment_data, filename=filename, content_type="application/octet-stream")
         form_data.add_field("payload_json", json.dumps({
             "attachments": [
                 {
