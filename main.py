@@ -232,15 +232,30 @@ async def convert_message(
     client: AndroidAPI,
     message: Message,
     userindex: list[str],
+    users: dict[str, Any],
     *,
     thread_id: str | int,
     webhook_url: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     numeric_id = message.message_id.split(".")[1]
-    converted = {
-        "u": userindex.index(message.message_sender.id),
-        "t": message.timestamp,
-    }
+
+    try:
+        converted = {
+            "u": userindex.index(message.message_sender.id),
+            "t": message.timestamp,
+        }
+    except ValueError:
+        # User not found, probably was kicked?
+        userindex.append(message.message_sender.id)
+        userindex[message.message_sender_id] = {
+            "name": message.message_sender.messaging_actor.name or "Facebook user",
+            "avatar": "",
+            "tag": "0",
+        }
+        converted = {
+            "u": len(userindex) - 1,
+            "t": message.timestamp,
+        }
 
     if webhook_url:
         if message.sticker:
@@ -375,6 +390,7 @@ async def main(args):
                     api,
                     message,
                     dump["meta"]["userindex"],
+                    dump["meta"]["users"],
                     webhook_url=args.webhook,
                     thread_id=real_thread_id,
                 )
