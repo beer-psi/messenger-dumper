@@ -372,7 +372,7 @@ async def main(args):
         while backfill_more:
             # print(f"[INFO] Fetching messages before {before_time_ms}")
             try:
-                resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=50)
+                resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=95)
                 messages = resp.nodes
             except RateLimitExceeded:
                 print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
