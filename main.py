@@ -165,7 +165,7 @@ async def convert_sticker(
     client: AndroidAPI,
     sticker: MinimalSticker,
     webhook_url: str,
-) -> dict[str, Any]:
+) -> None | dict[str, Any]:
     resp = await client.fetch_stickers([int(sticker.id)], sticker_labels_enabled=True)
     sticker = resp.nodes[0]
     image = sticker.animated_image or sticker.thread_image
@@ -177,7 +177,7 @@ async def convert_sticker(
         "name": reuploaded_url[0],
         "width": image.width,
         "height": image.height,
-    }
+    } if reuploaded_url else None
 
 
 async def convert_attachment(
@@ -240,13 +240,13 @@ async def convert_message(
         if message.sticker:
             if "a" not in converted:
                 converted["a"] = []
-            converted["a"].append(
-                await convert_sticker(
-                    client,
-                    message.sticker,
-                    webhook_url,
-                )
+            uploaded_sticker = await convert_sticker(
+                client,
+                message.sticker,
+                webhook_url,
             )
+            if uploaded_sticker:
+                converted["a"].append(uploaded_sticker)
         if len(message.blob_attachments) > 0:
             if "a" not in converted:
                 converted["a"] = []
