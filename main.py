@@ -9,13 +9,13 @@ import mimetypes
 import os
 import time
 import re
-from io import BytesIO
 from typing import Any
 
 from maufbapi import AndroidAPI, AndroidState
 from maufbapi.http.errors import RateLimitExceeded
 from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
 from mautrix.util.proxy import ProxyHandler
+from tqdm import tqdm
 
 
 _MARKDOWN_ESCAPE_SUBREGEX = '|'.join(r'\{0}(?=([\s\S]*((?<!\{0})\{0})))'.format(c) for c in ('*', '`', '_', '~', '|'))
@@ -269,7 +269,11 @@ async def convert_message(
                     converted["a"].append(content)
     if message.message:
         converted["m"] = escape_markdown(message.message.text)
-    if message.replied_to_message and message.replied_to_message.message.message_id:
+    if (
+        message.replied_to_message 
+        and message.replied_to_message.message
+        and message.replied_to_message.message.message_id
+    ):
         replied_numeric_id = message.replied_to_message.message.message_id.split(".")[1]
         converted["r"] = replied_numeric_id
 
@@ -279,18 +283,22 @@ async def convert_message(
 async def main(args):
     state, api = await get_credentials(args.credentials)
     
-    dump = {
-        "meta": {
-            "users": {},
-            "userindex": [],
-            "servers": {
-                "name": "Default Server",
-                "type": "server",
+    if os.path.exists("dht.json"):
+        with open("dht.json") as f:
+            dump = json.load(f)
+    else:
+        dump = {
+            "meta": {
+                "users": {},
+                "userindex": [],
+                "servers": {
+                    "name": "Default Server",
+                    "type": "server",
+                },
+                "channels": {},
             },
-            "channels": {},
-        },
-        "data": {},
-    }
+            "data": {},
+        }
 
     for thread_id in args.id:
         str_thread_id = str(thread_id)
@@ -307,12 +315,15 @@ async def main(args):
             real_thread_id = thread_info[0].thread_key.id
         
         info = thread_info[0]
-        dump["meta"]["channels"][str_thread_id] = {
-            "server": 0,
-            "name": info.name or "No Name",
-            "nsfw": False,
-        }
-        dump["data"][str_thread_id] = {}
+
+        if str_thread_id not in dump["meta"]["channels"]:
+            dump["meta"]["channels"][str_thread_id] = {
+                "server": 0,
+                "name": info.name or "No Name",
+                "nsfw": False,
+            }
+        if str_thread_id not in dump["data"]:
+            dump["data"][str_thread_id] = {}
 
         print(f"[INFO] Fetching users for thread {info.name} ({thread_id})")
         for pcp in info.all_participants.nodes:
@@ -331,12 +342,22 @@ async def main(args):
             }
         
         print(f"[INFO] Fetching messages for thread {info.name} ({thread_id})")
-        before_time_ms = int(time.time() * 1000)
+        dumped_message_count = len(dump["data"][str_thread_id])
+        if dumped_message_count > 0:
+            before_time_ms = min(
+                x["t"] for x in dump["data"][str_thread_id].values()
+            ) - 1
+            print(f"[INFO] Continuing from timestamp {before_time_ms}")
+        else:
+            before_time_ms = int(time.time() * 1000)
+            print("[INFO] Starting from newest message")
+
         backfill_more = True
+        pbar = tqdm(total=info.messages_count - dumped_message_count)
         while backfill_more:
-            print(f"[INFO] Fetching messages before {before_time_ms}")
+            # print(f"[INFO] Fetching messages before {before_time_ms}")
             try:
-                resp = await api.fetch_messages(thread_id, before_time_ms)
+                resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=50)
                 messages = resp.nodes
             except RateLimitExceeded:
                 print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
@@ -349,6 +370,7 @@ async def main(args):
                 break
 
             for message in messages:
+                pbar.update(1)
                 numeric_id, data = await convert_message(
                     api,
                     message,
@@ -359,20 +381,26 @@ async def main(args):
                 dump["data"][str_thread_id][numeric_id] = data
 
             before_time_ms = messages[0].timestamp - 1
-
-            dump["data"][str_thread_id] = dict(
-                sorted(
-                    dump["data"][str_thread_id].items(),
-                    key=lambda x: x[1]["t"],
-                )
-            )
-
             with open("dht.json", "w") as f:
                 json.dump(dump, f, ensure_ascii=False, indent=4)
+        pbar.close()
+
+        dump["data"][str_thread_id] = dict(
+            sorted(
+                dump["data"][str_thread_id].items(),
+                key=lambda x: x[1]["t"],
+            )
+        )
+
+        with open("dht.json", "w") as f:
+            json.dump(dump, f, ensure_ascii=False, indent=4)
     
     with open("template.html", "r") as f:
         template = f.read()
-        filled_template = template.replace("/*[ARCHIVE]*/", json.dumps(json.dumps(dump)))
+        filled_template = template.replace(
+            '"/*[ARCHIVE]*/"',
+            json.dumps(json.dumps(dump))
+        )
     
     with open(f"archive_{int(time.time())}.html", "w") as f:
         f.write(filled_template)

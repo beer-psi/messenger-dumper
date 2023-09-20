@@ -12,3 +12,4 @@ pycryptodome==3.19.0
 python-magic==0.4.27
 yarl==1.9.2
 zstandard==0.21.0
+tqdm
