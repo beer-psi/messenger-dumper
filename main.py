@@ -9,6 +9,7 @@ import mimetypes
 import os
 import time
 import re
+from io import BytesIO
 from typing import Any
 
 from maufbapi import AndroidAPI, AndroidState
@@ -140,10 +141,13 @@ async def reupload_fb_file(
             return None
 
         data = await resp.read()
+        io = BytesIO(data)
 
     while True:
+        io.seek(0)
+        
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field("files[0]", data, filename=filename, content_type="application/octet-stream")
+        form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
         form_data.add_field("payload_json", json.dumps({
             "attachments": [
                 {
@@ -158,8 +162,8 @@ async def reupload_fb_file(
         data = await resp.json()
 
         if "attachments" not in data:
-            if (reset_after := resp.headers.get("x-ratelimit-reset-after")):
-                await asyncio.sleep(int(reset_after) + 1)
+            if "retry_after" in data:
+                await asyncio.sleep(int(data["retry_after"]) + 1)
                 continue
             else:
                 return None
