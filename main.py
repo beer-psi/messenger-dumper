@@ -141,24 +141,29 @@ async def reupload_fb_file(
 
         data = await resp.read()
 
-    form_data = aiohttp.FormData(quote_fields=False)
-    form_data.add_field("files[0]", data, filename=filename, content_type="application/octet-stream")
-    form_data.add_field("payload_json", json.dumps({
-        "attachments": [
-            {
-                "id": 0,
-                "filename": filename,
-            }
-        ],
-        "content": "",
-    }))
+    while True:
+        form_data = aiohttp.FormData(quote_fields=False)
+        form_data.add_field("files[0]", data, filename=filename, content_type="application/octet-stream")
+        form_data.add_field("payload_json", json.dumps({
+            "attachments": [
+                {
+                    "id": 0,
+                    "filename": filename,
+                }
+            ],
+            "content": "",
+        }))
 
-    resp = await client.http_post(webhook_url, data=form_data)
-    data = await resp.json()
+        resp = await client.http_post(webhook_url, data=form_data)
+        data = await resp.json()
 
-    if "attachments" not in data:
-        return None
-    return data["attachments"][0]["filename"], data["attachments"][0]["url"]
+        if "attachments" not in data:
+            if (reset_after := resp.headers.get("x-ratelimit-reset-after")):
+                await asyncio.sleep(int(reset_after) + 1)
+                continue
+            else:
+                return None
+        return data["attachments"][0]["filename"], data["attachments"][0]["url"]
 
 
 async def convert_sticker(
