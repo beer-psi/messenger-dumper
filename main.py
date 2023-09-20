@@ -247,7 +247,7 @@ async def convert_message(
     except ValueError:
         # User not found, probably was kicked?
         userindex.append(message.message_sender.id)
-        userindex[message.message_sender.id] = {
+        users[message.message_sender.id] = {
             "name": message.message_sender.messaging_actor.name or "Facebook user",
             "avatar": "",
             "tag": "0",
