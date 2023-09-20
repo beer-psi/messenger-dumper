@@ -141,11 +141,10 @@ async def reupload_fb_file(
             return None
 
         data = await resp.read()
-        io = BytesIO(data)
 
     while True:
-        io.seek(0)
-        
+        io = BytesIO(data)
+
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
         form_data.add_field("payload_json", json.dumps({
