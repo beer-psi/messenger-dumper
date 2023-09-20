@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from maufbapi import AndroidAPI, AndroidState
-from maufbapi.http.errors import RateLimitExceeded
+from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
 from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
 from mautrix.util.proxy import ProxyHandler
 from tqdm import tqdm
@@ -172,7 +172,10 @@ async def convert_sticker(
     sticker: MinimalSticker,
     webhook_url: str,
 ) -> None | dict[str, Any]:
-    resp = await client.fetch_stickers([int(sticker.id)], sticker_labels_enabled=True)
+    try:
+        resp = await client.fetch_stickers([int(sticker.id)], sticker_labels_enabled=True)
+    except ResponseTypeError:
+       return None 
     sticker = resp.nodes[0]
     image = sticker.animated_image or sticker.thread_image
     url = image.uri
