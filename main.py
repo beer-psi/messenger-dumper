@@ -309,10 +309,10 @@ async def main(args):
             "meta": {
                 "users": {},
                 "userindex": [],
-                "servers": {
-                    "name": "Default Server",
+                "servers": [{
+                    "name": "default",
                     "type": "server",
-                },
+                }],
                 "channels": {},
             },
             "data": {},
