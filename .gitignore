@@ -1,0 +1,5 @@
+.credentials
+archive_*.html
+dht*.json
+env/
+__pycache__/
