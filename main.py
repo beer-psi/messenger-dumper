@@ -9,6 +9,7 @@ import mimetypes
 import os
 import time
 import re
+from io import BytesIO
 from typing import Any, Optional
 
 import aiohttp
@@ -156,8 +157,9 @@ async def reupload_fb_file(
         attachment_data = await resp.read()
 
     while True:
+        io = BytesIO(attachment_data)
         form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field("files[0]", attachment_data, filename=filename, content_type="application/octet-stream")
+        form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
         form_data.add_field("payload_json", json.dumps({
             "attachments": [
                 {
