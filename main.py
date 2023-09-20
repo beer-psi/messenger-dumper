@@ -1,6 +1,6 @@
 import asyncio
-import aiohttp
 import argparse
+import datetime
 import hashlib
 import hmac
 import json
@@ -9,8 +9,10 @@ import mimetypes
 import os
 import time
 import re
-from typing import Any
+from typing import Any, Optional
 
+import aiohttp
+from aiohttp.client_exceptions import ContentTypeError
 from maufbapi import AndroidAPI, AndroidState
 from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
 from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
@@ -123,6 +125,17 @@ async def get_credentials(credentials_filename) -> tuple[AndroidState, AndroidAP
     return state, api
 
 
+def parse_ratelimit_header(request: Any, *, use_clock: bool = False) -> float:
+    reset_after: Optional[str] = request.headers.get('X-Ratelimit-Reset-After')
+    if use_clock or not reset_after:
+        utc = datetime.timezone.utc
+        now = datetime.datetime.now(utc)
+        reset = datetime.datetime.fromtimestamp(float(request.headers['X-Ratelimit-Reset']), utc)
+        return (reset - now).total_seconds()
+    else:
+        return float(reset_after)
+
+
 async def reupload_fb_file(
     client: AndroidAPI,
     url: str,
@@ -156,11 +169,16 @@ async def reupload_fb_file(
         }))
 
         resp = await client.http_post(webhook_url, data=form_data)
-        data = await resp.json()
+        reset_after = parse_ratelimit_header(resp)
+        try:
+            data = await resp.json()
+        except ContentTypeError:
+            await asyncio.sleep(reset_after)
+            continue
 
         if "attachments" not in data:
             if "retry_after" in data:
-                await asyncio.sleep(int(data["retry_after"]) + 1)
+                await asyncio.sleep(reset_after)
                 continue
             else:
                 return None
