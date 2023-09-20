@@ -101,6 +101,8 @@ async def reupload_fb_file(
     resp = await client.http_post(webhook_url, data=form_data)
     data = await resp.json()
 
+    if "attachments" not in data:
+        return None
     return data["attachments"][0]["filename"], data["attachments"][0]["url"]
 
 
@@ -194,19 +196,16 @@ async def convert_message(
             if "a" not in converted:
                 converted["a"] = []
             
-            attachment_contents = await asyncio.gather(
-                *[
-                    convert_attachment(
-                        client,
-                        attachment,
-                        webhook_url,
-                        thread_id=thread_id,
-                        message_id=message.message_id,
-                    )
-                    for attachment in message.blob_attachments
-                ]
-            )
-            converted["a"].extend(c for c in attachment_contents if c)
+            for attachment in message.blob_attachments:
+                content = await convert_attachment(
+                    client,
+                    attachment,
+                    webhook_url,
+                    thread_id=thread_id,
+                    message_id=message.message_id,
+                )
+                if content:
+                    converted["a"].append(content)
     if message.message:
         converted["m"] = message.message.text
     if message.replied_to_message and message.replied_to_message.message.message_id:
