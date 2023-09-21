@@ -259,7 +259,7 @@ async def convert_message(
     users: dict[str, Any],
     *,
     thread_id: str | int,
-    webhook_url: str | None = None,
+    webhook_urls: list[str],
 ) -> tuple[str, dict[str, Any]]:
     numeric_id = message.message_id.split(".")[1]
 
@@ -281,14 +281,14 @@ async def convert_message(
             "t": message.timestamp,
         }
 
-    if webhook_url:
+    if len(webhook_urls) > 0:
         if message.sticker:
             if "a" not in converted:
                 converted["a"] = []
             uploaded_sticker = await convert_sticker(
                 client,
                 message.sticker,
-                webhook_url,
+                random.choice(webhook_urls),
             )
             if uploaded_sticker:
                 converted["a"].append(uploaded_sticker)
@@ -300,7 +300,7 @@ async def convert_message(
                 content = await convert_attachment(
                     client,
                     attachment,
-                    webhook_url,
+                    random.choice(webhook_urls),
                     thread_id=thread_id,
                     message_id=message.message_id,
                 )
@@ -415,7 +415,7 @@ async def main(args):
                     message,
                     dump["meta"]["userindex"],
                     dump["meta"]["users"],
-                    webhook_url=random.choice(args.webhook),
+                    webhook_urls=args.webhook,
                     thread_id=real_thread_id,
                 )
                 dump["data"][str_thread_id][numeric_id] = data
@@ -468,7 +468,7 @@ if __name__ == "__main__":
         "-w",
         "--webhook",
         type=str,
-        nargs="+",
+        nargs="*",
         help="Discord webhook URL (for preserving attachments)",
     )
 
