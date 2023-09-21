@@ -530,7 +530,7 @@ async def execute(args):
                 print("[INFO] Starting from newest message")
                 
 
-            print(f"[INFO] Queueing tasks for thread {info.name} ({real_thread_id})")
+            print(f"[INFO] Fetching messages for {info.name} ({real_thread_id})")
             backfill_more = True
             
             semaphore = asyncio.Semaphore(10)
@@ -543,9 +543,10 @@ async def execute(args):
                         webhook_urls=args.webhook,
                     )
 
-            tasks = []
+            
             pbar = tqdm(total=info.messages_count - dumped_message_count)
             while backfill_more:
+                tasks = []
                 try:
                     resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=95)
                     messages = resp.nodes
@@ -559,47 +560,43 @@ async def execute(args):
                     backfill_more = False
                     break
 
-                for message in messages:
-                    pbar.update(1)
-                    tasks.append(task(message))
+                tasks.extend(task(message) for message in messages)
 
-                before_time_ms = messages[0].timestamp - 1
-
-            print(f"[INFO] Processing results for {info.name} ({real_thread_id})")
-            pbar = tqdm(total=info.messages_count - dumped_message_count)
-            for future in asyncio.as_completed(tasks):
-                result = await future
-                await conn.executemany(
-                    "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                    result["users"],
-                )
-                await conn.execute(
-                    (
-                        "INSERT INTO messages(id, sender_id, channel_id, text, timestamp, unsent_timestamp) "
-                        "VALUES (?, ?, ?, ?, ? ,?) ON CONFLICT DO NOTHING"
-                    ),
-                    result["message"],
-                )
-                
-                if "replied_to" in result:
+                for future in asyncio.as_completed(tasks):
+                    result = await future
+                    await conn.executemany(
+                        "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                        result["users"],
+                    )
                     await conn.execute(
-                        "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                        result["replied_to"],
-                    )
-                
-                if "attachments" in result:
-                    await conn.executemany(
                         (
-                            "INSERT INTO attachments(id, message_id, name, type, url, width, height) VALUES(?, ?, ?, ?, ?, ?, ?) "
-                            "ON CONFLICT DO NOTHING"
+                            "INSERT INTO messages(id, sender_id, channel_id, text, timestamp, unsent_timestamp) "
+                            "VALUES (?, ?, ?, ?, ? ,?) ON CONFLICT DO NOTHING"
                         ),
-                        result["attachments"],
+                        result["message"],
                     )
+                    
+                    if "replied_to" in result:
+                        await conn.execute(
+                            "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                            result["replied_to"],
+                        )
+                    
+                    if "attachments" in result:
+                        await conn.executemany(
+                            (
+                                "INSERT INTO attachments(id, message_id, name, type, url, width, height) VALUES(?, ?, ?, ?, ?, ?, ?) "
+                                "ON CONFLICT DO NOTHING"
+                            ),
+                            result["attachments"],
+                        )
+                    
+                    if "reactions" in result:
+                        await conn.executemany(
+                            "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                            result["reactions"]
+                        )  
+                    await conn.commit()
+                    pbar.update(1)
                 
-                if "reactions" in result:
-                    await conn.executemany(
-                        "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
-                        result["reactions"]
-                    )  
-                await conn.commit()
-                pbar.update(1)
+                before_time_ms = messages[0].timestamp - 1

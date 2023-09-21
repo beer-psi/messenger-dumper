@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS messages(
     sender_id BIGINT NOT NULL,
     channel_id BIGINT NOT NULL,
     `text` TEXT,
-    `timestamp` DATETIME NOT NULL,
-    `unsent_timestamp` DATETIME,
+    `timestamp` BIGINT NOT NULL,
+    `unsent_timestamp` BIGINT,
     FOREIGN KEY (sender_id) REFERENCES users(id),
     FOREIGN KEY (channel_id) REFERENCES channels(id)
 );

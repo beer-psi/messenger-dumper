@@ -61,7 +61,7 @@ async def execute(args):
                         int(data["meta"]["userindex"][message["u"]]),
                         channel_id,
                         message.get("m", ""),
-                        datetime.datetime.fromtimestamp(message["t"] / 1000),
+                        message["t"],
                         None,
                     ))
 
