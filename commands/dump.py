@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import aiohttp
 import aiosqlite
-from aiohttp.client_exceptions import ContentTypeError
+from aiohttp.client_exceptions import ContentTypeError, ClientPayloadError, ClientOSError
 from maufbapi import AndroidAPI, AndroidState
 from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
 from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
@@ -198,17 +198,28 @@ async def reupload_fb_file(
         else:
             return float(reset_after)
         
-    async with client.raw_http_get(
-        url, 
-        headers={"referer": f"fbapp://{client.state.application.client_id}/{referer}"},
-        sandbox=False,
-    ) as resp:
-        length = int(resp.headers["Content-Length"])
-        if length > 25_000_000: # 25 MiB being maximum upload size for Discord
+    backoff = 1
+    while True:
+        if backoff > 10:
+            print(f"[ERROR] Could not download attachment {filename} with URL {url}")
             return None
 
-        attachment_data = await resp.read()
-    
+        try:
+            async with client.raw_http_get(
+                url, 
+                headers={"referer": f"fbapp://{client.state.application.client_id}/{referer}"},
+                sandbox=False,
+            ) as resp:
+                length = int(resp.headers["Content-Length"])
+                if length > 25_000_000: # 25 MiB being maximum upload size for Discord
+                    return None
+
+                attachment_data = await resp.read()
+                break
+        except (ClientPayloadError, ClientOSError):
+            await asyncio.sleep(backoff)
+            backoff += 1
+            continue
 
     form_data = aiohttp.FormData(quote_fields=False)
     form_data.add_field("files[0]", attachment_data, filename=filename, content_type="application/octet-stream")
