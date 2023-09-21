@@ -281,20 +281,24 @@ async def convert_attachment(
             full_screen = attachment.image_full_screen
             width = attachment.original_dimensions.x
             height = attachment.original_dimensions.y
+            attachment_type = "image"
         else:
             full_screen = attachment.animated_image_full_screen
             width = attachment.animated_image_original_dimensions.x
             height = attachment.animated_image_original_dimensions.y
-        
+            attachment_type = "gif"
         url = full_screen.uri
         if (width, height) > full_screen.dimensions:
             url = await client.get_image_url(message_id, attachment.attachment_fbid) or url
     elif attachment.typename == AttachmentType.AUDIO:
         url = attachment.playable_url
+        attachment_type = "audioclip"
     elif attachment.typename == AttachmentType.VIDEO:
         url = attachment.attachment_video_url
+        attachment_type = "video"
     elif attachment.typename == AttachmentType.FILE:
         url = await client.get_file_url(thread_id, message_id, attachment.attachment_fbid)
+        attachment_type = "file"
     else: 
         print(f"[WARN] Unsupported attachment type {attachment.typename}")
         return None
@@ -303,6 +307,8 @@ async def convert_attachment(
     return {
         "url": reuploaded_url[1],
         "name": reuploaded_url[0],
+        "type": attachment_type,
+        "id": attachment.id,
     } if reuploaded_url else None
     
 
@@ -404,12 +410,8 @@ async def convert_message(
                     continue
                 url = attachment["url"]
                 name = attachment["name"]
-                attachment_type = name.split("-", 1)[0]
-                attachment_id = (
-                    name
-                    .split("-", 1)[1]
-                    .split(".", 1)[0]
-                )
+                attachment_type = attachment["type"]
+                attachment_id = attachment["id"]
                 result["attachments"].append(
                     (
                         attachment_id,
