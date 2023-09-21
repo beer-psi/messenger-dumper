@@ -545,36 +545,27 @@ async def execute(args):
             backfill_more = True
             
             semaphore = asyncio.Semaphore(10)
-            async def task(message: Message):
+            async def rate_limited_message_task(
+                message: Message,
+                queue: asyncio.Queue,
+            ):
                 async with semaphore:
-                    return await convert_message(
+                    result = await convert_message(
                         api,
                         message,
                         thread_id=real_thread_id,
                         webhook_urls=args.webhook,
-                    )
-
+                    )  
+                    return queue.put_nowait(result)
             
-            pbar = tqdm(total=info.messages_count - dumped_message_count)
-            while backfill_more:
-                tasks = []
-                try:
-                    resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=95)
-                    messages = resp.nodes
-                except RateLimitExceeded:
-                    print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
-                    await asyncio.sleep(300)
-                    continue
-                
-                if len(messages) == 0 or not messages:
-                    print("[INFO] Nothing left to fetch.")
-                    backfill_more = False
-                    break
-
-                tasks.extend(task(message) for message in messages)
-
-                for future in asyncio.as_completed(tasks):
-                    result = await future
+            async def db_worker(
+                conn: aiosqlite.Connection,
+                queue: asyncio.Queue,
+                pbar: tqdm,
+            ):
+                while True:
+                    result = await queue.get()
+                    
                     await conn.executemany(
                         "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
                         result["users"],
@@ -607,7 +598,38 @@ async def execute(args):
                             "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
                             result["reactions"]
                         )  
+
                     await conn.commit()
                     pbar.update(1)
+                    queue.task_done()
+            
+            pbar = tqdm(total=info.messages_count - dumped_message_count)
+            db_queue = asyncio.Queue()
+            db_task = asyncio.create_task(db_worker(conn, db_queue, pbar))
+
+            while backfill_more:
+                tasks = []
+                try:
+                    resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=95)
+                    messages = resp.nodes
+                except RateLimitExceeded:
+                    print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
+                    await asyncio.sleep(300)
+                    continue
+                
+                if len(messages) == 0 or not messages:
+                    print("[INFO] Nothing left to fetch.")
+                    backfill_more = False
+                    break
+
+                tasks = [
+                    rate_limited_message_task(message, db_queue)
+                    for message in messages
+                ]
+
+                await asyncio.gather(*tasks)
                 
                 before_time_ms = messages[0].timestamp - 1
+            
+            await db_queue.join()
+            await db_task.cancel()
