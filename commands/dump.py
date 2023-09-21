@@ -208,46 +208,38 @@ async def reupload_fb_file(
             return None
 
         attachment_data = await resp.read()
+    
 
-    async def internal(attachment_data):
-        io = BytesIO(attachment_data)
-        form_data = aiohttp.FormData(quote_fields=False)
-        form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
-        form_data.add_field("payload_json", json.dumps({
-            "attachments": [
-                {
-                    "id": 0,
-                    "filename": filename,
-                }
-            ],
-            "content": "",
-        }))
+    form_data = aiohttp.FormData(quote_fields=False)
+    form_data.add_field("files[0]", attachment_data, filename=filename, content_type="application/octet-stream")
+    form_data.add_field("payload_json", json.dumps({
+        "attachments": [
+            {
+                "id": 0,
+                "filename": filename,
+            }
+        ],
+        "content": "",
+    }))
 
-        resp = await client.http_post(webhook_url, data=form_data)
+    multipart_writer = form_data._gen_form_data()
+    
+    while True:
+        resp = await client.http_post(webhook_url, data=multipart_writer)
         reset_after = parse_ratelimit_header(resp)
         try:
             data = await resp.json()
         except ContentTypeError:
             await asyncio.sleep(reset_after)
-            return "continue"
+            continue
 
         if "attachments" not in data:
             if "retry_after" in data:
                 await asyncio.sleep(reset_after)
-                return "continue"
+                continue
             else:
                 return None
         return data["attachments"][0]["filename"], data["attachments"][0]["url"]
-
-    while True:
-        result = await internal(attachment_data)
-        if result is None:
-            return None
-        if isinstance(result, str):
-            continue
-        else:
-            return result
-
     
 
 async def convert_sticker(
