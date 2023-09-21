@@ -229,11 +229,13 @@ async def reupload_fb_file(
             data = await resp.json()
         except ContentTypeError:
             await asyncio.sleep(reset_after)
+            del form_data
             continue
 
         if "attachments" not in data:
             if "retry_after" in data:
                 await asyncio.sleep(reset_after)
+                del form_data
                 continue
             else:
                 return None
