@@ -1,5 +1,6 @@
-import datetime
+import json
 import os
+import time
 
 import aiosqlite
 
@@ -84,13 +85,45 @@ async def execute(args):
                     dump["data"][str_thread_id][id] = {
                         "u": dump["meta"]["userindex"].index(str(sender_id)),
                         "t": timestamp,
-                        "m": text,
                     }
+
+                    if text:
+                        dump["data"][str_thread_id][id]["m"] = text
+                    
+                    async with conn.execute(
+                        (
+                            "SELECT replied_to_id "
+                            "FROM replied_to "
+                            "WHERE message_id = ?"
+                        ),
+                        (id,)
+                    ) as cursor:
+                        replied_to_id = await cursor.fetchone()
+                        if replied_to_id:
+                            dump["data"][str_thread_id][id]["r"] = replied_to_id[0]
+
+                    async with conn.execute(
+                        (
+                            "SELECT emoji, count "
+                            "FROM reactions "
+                            "WHERE message_id = ?"
+                        ),
+                        (id,)
+                    ) as cursor:
+                        async for reaction in cursor:
+                            if "re" not in dump["data"][str_thread_id][id]:
+                                dump["data"][str_thread_id][id]["re"] = []
+                            
+                            reaction_object = {
+                                "n": reaction[0],
+                                "c": reaction[1],
+                            }
+                            dump["data"][str_thread_id][id]["re"].append(reaction_object)
 
                     async with conn.execute(
                         (
                             "SELECT name, url, width, height "
-                            "FROM attachments ",
+                            "FROM attachments "
                             "WHERE message_id = ?"
                         ),
                         (id,)
@@ -107,5 +140,25 @@ async def execute(args):
                                 dumped_attachment["width"] = attachment[2]
                             if attachment[3]:
                                 dumped_attachment["height"] = attachment[3]
-                            dump["data"][str_thread_id][id]["a"]
+                            dump["data"][str_thread_id][id]["a"].append(dumped_attachment)
+
+    with open("dht.json", "w") as f:
+        json.dump(dump, f, indent=4, ensure_ascii=False)
+    
+    with open("template.html") as f:
+        template = f.read()
+    
+    template = template.replace(
+        '"/*[ARCHIVE]*/"',
+        json.dumps(
+            json.dumps(
+                dump,
+                ensure_ascii=False
+            ),
+            ensure_ascii=False
+        )
+    )
+    with open(f"archive-{int(time.time())}.html", "w") as f:
+        f.write(template)
+
                 

@@ -172,7 +172,7 @@ const DISCORD = (function() {
 			].join(""));
 			
 			templateUserAvatar = new TEMPLATE([
-				"<img src='https://cdn.discordapp.com/avatars/{id}/{path}.webp?size=128' alt=''>"
+				"<img src='{url}' alt=''>"
 			].join(""));
 			
 			// noinspection HtmlUnknownTarget
@@ -988,7 +988,8 @@ const STATE = (function() {
 			 */
 			const message = messages[key];
 			const user = getUser(message.u);
-			const avatar = user.avatar ? { id: getUserId(message.u), path: user.avatar } : null;
+			// const avatar = user.avatar ? { id: getUserId(message.u), path: user.avatar } : null;
+			const avatar = user.avatar ? { url: user.avatar } : null;
 			
 			const obj = {
 				user,
@@ -1016,7 +1017,7 @@ const STATE = (function() {
 			if ("r" in message) {
 				const replyMessage = getMessageById(message.r);
 				const replyUser = replyMessage ? getUser(replyMessage.u) : null;
-				const replyAvatar = replyUser && replyUser.avatar ? { id: getUserId(replyMessage.u), path: replyUser.avatar } : null;
+				const replyAvatar = replyUser && replyUser.avatar ? { url: replyUser.avatar } : null;
 				
 				obj["reply"] = replyMessage ? {
 					"id": message.r,
