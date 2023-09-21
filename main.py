@@ -9,6 +9,7 @@ import mimetypes
 import os
 import time
 import re
+import random
 from io import BytesIO
 from typing import Any, Optional
 
@@ -414,7 +415,7 @@ async def main(args):
                     message,
                     dump["meta"]["userindex"],
                     dump["meta"]["users"],
-                    webhook_url=args.webhook,
+                    webhook_url=random.choice(args.webhook),
                     thread_id=real_thread_id,
                 )
                 dump["data"][str_thread_id][numeric_id] = data
@@ -467,7 +468,7 @@ if __name__ == "__main__":
         "-w",
         "--webhook",
         type=str,
-        nargs="?",
+        nargs="+",
         help="Discord webhook URL (for preserving attachments)",
     )
 
