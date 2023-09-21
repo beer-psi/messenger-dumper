@@ -209,7 +209,7 @@ async def reupload_fb_file(
 
         attachment_data = await resp.read()
 
-    while True:
+    async def internal(attachment_data):
         io = BytesIO(attachment_data)
         form_data = aiohttp.FormData(quote_fields=False)
         form_data.add_field("files[0]", io, filename=filename, content_type="application/octet-stream")
@@ -229,17 +229,25 @@ async def reupload_fb_file(
             data = await resp.json()
         except ContentTypeError:
             await asyncio.sleep(reset_after)
-            del form_data
-            continue
+            return "continue"
 
         if "attachments" not in data:
             if "retry_after" in data:
                 await asyncio.sleep(reset_after)
-                del form_data
-                continue
+                return "continue"
             else:
                 return None
         return data["attachments"][0]["filename"], data["attachments"][0]["url"]
+
+    while True:
+        result = await internal(attachment_data)
+        if result is None:
+            return None
+        if isinstance(result, str):
+            continue
+        else:
+            return result
+
     
 
 async def convert_sticker(
