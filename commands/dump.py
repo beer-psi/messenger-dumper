@@ -185,11 +185,15 @@ async def reupload_fb_file(
     referer: str = "messenger_thread_photo"
 ) -> None | tuple[str, str]:
     def parse_ratelimit_header(request: Any, *, use_clock: bool = False) -> float:
+        reset: Optional[str] = request.headers.get("X-Ratelimit-Reset")
         reset_after: Optional[str] = request.headers.get('X-Ratelimit-Reset-After')
+        if not reset:
+            # We raped Discord's servers too hard
+            return 60.0
         if use_clock or not reset_after:
             utc = datetime.timezone.utc
             now = datetime.datetime.now(utc)
-            reset = datetime.datetime.fromtimestamp(float(request.headers['X-Ratelimit-Reset']), utc)
+            reset = datetime.datetime.fromtimestamp(float(reset), utc)
             return (reset - now).total_seconds()
         else:
             return float(reset_after)
@@ -336,12 +340,8 @@ async def convert_message(
                 if message.message 
                 else ("*Unsent*" if message.unsent_timestamp else "")
             ),
-            datetime.datetime.fromtimestamp(message.timestamp / 1000),
-            (
-                datetime.datetime.fromtimestamp(message.unsent_timestamp / 1000) 
-                if message.unsent_timestamp 
-                else None
-            ),
+            message.timestamp,
+            message.unsent_timestamp,
         ),
     }
 
@@ -523,10 +523,7 @@ async def execute(args):
                     (real_thread_id,)
                 ) as cursor:
                     earliest_timestamp = (await cursor.fetchone())[0]
-                    before_time_ms = datetime.datetime.strptime(
-                        earliest_timestamp,
-                        "%Y-%m-%d %H:%M:%S.%f",
-                    ).timestamp() * 1000
+                    before_time_ms = earliest_timestamp
                     print(f"[INFO] Continuing from timestamp {before_time_ms}")
             else:
                 before_time_ms = int(time.time() * 1000)
