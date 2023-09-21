@@ -1,5 +1,6 @@
 .credentials
-archive_*.html
-dht*.json
+*.html
+!template.html
+*.json
 env/
 __pycache__/

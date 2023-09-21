@@ -67,7 +67,7 @@ async def execute(args):
 
                     if (replied_to_id := message.get("r")):
                         if not replied_to_id.startswith("mid."):
-                            replied_to_id = "mid." + message_id
+                            replied_to_id = "mid." + replied_to_id
                         replied_to_rows.append((
                             message_id,
                             replied_to_id,

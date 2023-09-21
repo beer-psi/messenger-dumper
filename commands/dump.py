@@ -11,7 +11,6 @@ import random
 import re
 import time
 import uuid
-from io import BytesIO
 from typing import Any, Optional
 
 import aiohttp
@@ -20,6 +19,7 @@ from aiohttp.client_exceptions import ContentTypeError
 from maufbapi import AndroidAPI, AndroidState
 from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
 from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
+from mautrix.util import utf16_surrogate
 from mautrix.util.proxy import ProxyHandler
 from tqdm import tqdm
 
@@ -325,6 +325,19 @@ async def convert_message(
     thread_id: str | int,
     webhook_urls: list[str],
 ) -> dict[str, Any]:
+    msg_text = ""
+    if message.unsent_timestamp:
+        msg_text = "*Unsent*"
+    elif message.message:
+        msg_text = utf16_surrogate.add(message.message.text)
+        for m in reversed(message.message.ranges):
+            offset = m.offset
+            leng = m.length
+            if not m.entity or not m.entity.id:
+                continue
+            msg_text = f"{msg_text[:offset]}<@{m.entity.id}>{msg_text[offset + leng:]}"
+        msg_text = escape_markdown(utf16_surrogate.remove(msg_text))
+
     result = {
         "users": [
             (
@@ -337,11 +350,7 @@ async def convert_message(
             message.message_id,
             message.message_sender.id,
             int(thread_id),
-            (
-                escape_markdown(message.message.text) 
-                if message.message 
-                else ("*Unsent*" if message.unsent_timestamp else "")
-            ),
+            msg_text,
             message.timestamp,
             message.unsent_timestamp,
         ),
