@@ -216,7 +216,7 @@ async def reupload_fb_file(
 
                 attachment_data = await resp.read()
                 break
-        except (ClientPayloadError, ClientOSError):
+        except (ClientPayloadError, ClientOSError, asyncio.TimeoutError):
             await asyncio.sleep(backoff)
             backoff += 1
             continue
