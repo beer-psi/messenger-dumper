@@ -39,6 +39,12 @@ def add_command(subparsers):
         help="Thread IDs (the long number in the chat URL) to dump messages from",
     )
     dump_parser.add_argument(
+        "-l",
+        "--latest",
+        action="store_true",
+        help="Start from latest message instead of from earliest timestamp",
+    )
+    dump_parser.add_argument(
         "-c",
         "--credentials",
         type=str,
@@ -540,7 +546,7 @@ async def execute(args):
             ) as cursor:
                 dumped_message_count = (await cursor.fetchone())[0]
             
-            if dumped_message_count > 0:
+            if dumped_message_count > 0 and not args.latest:
                 async with conn.execute(
                     "SELECT timestamp FROM messages WHERE channel_id = ? ORDER BY timestamp ASC LIMIT 1",
                     (real_thread_id,)
