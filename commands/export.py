@@ -109,11 +109,11 @@ async def execute(args):
                     else:
                         dumped_message = dump["data"][str_thread_id][message_id]
 
-                    if "m" not in dumped_message:
-                        if text:
-                            dumped_message["m"] = text
-                        elif unsent_timestamp:
-                            dumped_message["m"] = "*Unsent*"
+                    if text and "m" not in dumped_message:
+                        dumped_message["m"] = text
+                    
+                    if unsent_timestamp and "tu" not in dumped_message:
+                        dumped_message["tu"] = unsent_timestamp
                     
                     if replied_to_id and "r" not in dumped_message:
                         dumped_message["r"] = replied_to_id

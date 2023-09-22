@@ -151,8 +151,8 @@ const DISCORD = (function() {
 			templateMessageNoAvatar = new TEMPLATE([
 				"<div>",
 				"<div class='reply-message'>{reply}</div>",
-				"<h2><strong class='username' title='#{user.tag}'>{user.name}</strong><span class='info time'>{timestamp}</span>{edit}{jump}</h2>",
-				"<div class='message'>{contents}{embeds}{attachments}</div>",
+				"<h2><strong class='username' title='#{user.tag}'>{user.name}</strong><span class='info time'>{timestamp}</span>{jump}</h2>",
+				"<div class='message'>{unsent}{contents}{embeds}{attachments}</div>",
 				"{reactions}",
 				"</div>"
 			].join(""));
@@ -163,8 +163,8 @@ const DISCORD = (function() {
 				"<div class='avatar-wrapper'>",
 				"<div class='avatar'>{avatar}</div>",
 				"<div>",
-				"<h2><strong class='username' title='#{user.tag}'>{user.name}</strong><span class='info time'>{timestamp}</span>{edit}{jump}</h2>",
-				"<div class='message'>{contents}{embeds}{attachments}</div>",
+				"<h2><strong class='username' title='#{user.tag}'>{user.name}</strong><span class='info time'>{timestamp}</span>{jump}</h2>",
+				"<div class='message'>{unsent}{contents}{embeds}{attachments}</div>",
 				"{reactions}",
 				"</div>",
 				"</div>",
@@ -299,8 +299,11 @@ const DISCORD = (function() {
 						}
 					}).join("");
 				}
-				else if (property === "edit") {
-					return value ? "<span class='info edited'>Edited " + DOM.getHumanReadableTime(value) + "</span>" : "";
+				// else if (property === "edit") {
+				// 	return value ? "<span class='info edited'>Edited " + DOM.getHumanReadableTime(value) + "</span>" : "";
+				// }
+				else if (property === "unsent") {
+					return value ? "<span class='unsent'>Unsent " + DOM.getHumanReadableTime(value) + "</span>" : "";
 				}
 				else if (property === "jump") {
 					return STATE.hasActiveFilter ? "<span class='info jump' data-jump='" + value + "'>Jump to message</span>" : "";
@@ -674,7 +677,8 @@ PROCESSOR.FILTER = {
 	withDownloads: (() => message => message.a && message.a.some(attachment => !DISCORD.isImageAttachment(attachment))),
 	withEmbeds: (() => message => message.e && message.e.length > 0),
 	withAttachments: (() => message => message.a && message.a.length > 0),
-	isEdited: (() => message => ("te" in message) ? message.te : (message.f & 1) === 1)
+	isEdited: (() => message => ("te" in message) ? message.te : (message.f & 1) === 1),
+	isUnsent: (() => message => ("tu" in message) && message.tu)
 };
 
 // --------------
@@ -981,6 +985,7 @@ const STATE = (function() {
 			 * @property {Number} t
 			 * @property {String} m
 			 * @property {Number} [te]
+			 * @property {Number} [tu]
 			 * @property {String} [r]
 			 * @property {{}[]} [a]
 			 * @property {String[]} [e]
@@ -1010,8 +1015,12 @@ const STATE = (function() {
 				obj["attachments"] = message.a;
 			}
 			
-			if ("te" in message) {
-				obj["edit"] = message.te;
+			// if ("te" in message) {
+			// 	obj["edit"] = message.te;
+			// }
+
+			if ("tu" in message) {
+				obj["unsent"] = message.tu;
 			}
 			
 			if ("r" in message) {
@@ -1222,8 +1231,12 @@ const STATE = (function() {
 					filterFunction = PROCESSOR.FILTER.withDownloads();
 					break;
 				
-				case "edited":
-					filterFunction = PROCESSOR.FILTER.isEdited();
+				// case "edited":
+				// 	filterFunction = PROCESSOR.FILTER.isEdited();
+				// 	break;
+				
+				case "unsent":
+					filterFunction = PROCESSOR.FILTER.isUnsent();
 					break;
 				
 				default:
@@ -1451,7 +1464,7 @@ body {
   letter-spacing: 0;
 }
 
-#messages .info {
+#messages .info, #messages .unsent {
   color: rgba(255, 255, 255, 0.4);
   font-size: 12px;
   font-weight: 500;
@@ -1758,7 +1771,8 @@ body {
           <option value="contents">Filter messages by contents&nbsp;</option>
           <option value="withimages">Only messages with images&nbsp;</option>
           <option value="withdownloads">Only messages with downloads&nbsp;</option>
-          <option value="edited">Only edited messages&nbsp;</option>
+          <!-- <option value="edited">Only edited messages&nbsp;</option> -->
+		  <option value="unsent">Only unsent messages</option>
         </select>
       </div>
       
@@ -1769,7 +1783,8 @@ body {
         <input id="opt-filter-contents" type="text" data-filter-type="contents" placeholder="Messages containing...">
         <input type="hidden" data-filter-type="withimages" value="1">
         <input type="hidden" data-filter-type="withdownloads" value="1">
-        <input type="hidden" data-filter-type="edited" value="1">
+        <!-- <input type="hidden" data-filter-type="edited" value="1"> -->
+		<input type="hidden" data-filter-type="unsent" value="1">
       </div>
       
       <div class="separator"></div>

@@ -643,4 +643,8 @@ async def execute(args):
                 before_time_ms = messages[0].timestamp - 1
             
             await db_queue.join()
-            await db_task.cancel()
+            db_task.cancel()
+            try:
+                await db_task
+            except asyncio.CancelledError:
+                pass
