@@ -57,7 +57,7 @@ const DISCORD = (function() {
 		formatUrl: /(\b(?:https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig,
 		formatUrlNoEmbed: /<(\b(?:https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])>/ig,
 		specialEscapedBacktick: /\\`/g,
-		specialEscapedSingle: /\\([*_\\])/g,
+		specialEscapedSingle: /\\([*_\\~])/g,
 		specialEscapedDouble: /\\__|_\\_|\\_\\_|\\~~|~\\~|\\~\\~/g,
 		specialUnescaped: /([*_~\\])/g,
 		mentionRole: /&lt;@&(\d+?)&gt;/g,
