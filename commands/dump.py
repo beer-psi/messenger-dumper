@@ -512,7 +512,7 @@ async def execute(args):
                         or "Facebook user"
                     )
                 )
-                profile_picture = None,
+                profile_picture = None
                 if (fb_profile_pic := (
                     actor.profile_pic_large 
                     or actor.profile_pic_medium
