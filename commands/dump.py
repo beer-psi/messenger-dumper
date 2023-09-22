@@ -63,7 +63,8 @@ def add_command(subparsers):
         "-w",
         "--webhook",
         type=str,
-        nargs="*",
+        nargs="+",
+        default=[],
         help="Discord webhook URL (for preserving attachments)",
     )
     dump_parser.add_argument(
