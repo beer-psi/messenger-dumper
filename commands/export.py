@@ -3,6 +3,7 @@ import os
 import time
 
 import aiosqlite
+from multidict import MultiDict
 from tqdm import tqdm
 
 
@@ -20,6 +21,68 @@ def add_command(subparsers):
         help="IDs of threads to export (the long string of number in the chat URL)",
     )
     return export_parser
+
+
+async def get_all_attachments(
+    connection: aiosqlite.Connection
+) -> MultiDict:
+    attachments = MultiDict()
+    async with connection.execute(
+        "SELECT message_id, name, type, url, width, height FROM attachments"
+    ) as cursor:
+        async for attachment in cursor:
+            (
+                message_id,
+                name,
+                attachment_type, 
+                url,
+                width,
+                height
+            ) = attachment
+
+            if not url or not name:
+                continue
+
+            dumped_attachment = {
+                "url": url,
+                "name": name,
+            }
+
+            if width:
+                dumped_attachment["width"] = width
+            if height:
+                dumped_attachment["height"] = height
+            attachments.add(message_id, dumped_attachment)
+    
+    return attachments
+
+
+async def get_all_reactions(
+    connection: aiosqlite.Connection
+) -> MultiDict:
+    reactions = MultiDict()
+    async with connection.execute(
+        "SELECT message_id, emoji, count FROM reactions"
+    ) as cursor:
+        async for reaction in cursor:
+            (
+                message_id,
+                emoji,
+                count
+            ) = reaction
+
+            if not emoji or not count:
+                continue
+
+            reactions.add(
+                message_id,
+                {
+                    "n": emoji,
+                    "c": count,
+                },
+            )
+    
+    return reactions
 
 
 async def execute(args):
@@ -40,6 +103,9 @@ async def execute(args):
             },
             "data": {},
         }
+
+        all_attachments = await get_all_attachments(conn)
+        all_reactions = await get_all_reactions(conn)
         
         for thread_id in args.id:
             str_thread_id = str(thread_id)
@@ -75,11 +141,9 @@ async def execute(args):
             dump["data"][str_thread_id] = {}
             async with conn.execute(
                 (
-                    "SELECT messages.id, sender_id, text, timestamp, unsent_timestamp, replied_to_id, emoji, count, name, url, width, height "
+                    "SELECT messages.id, sender_id, text, timestamp, unsent_timestamp, replied_to_id "
                     "FROM messages "
                     "LEFT JOIN replied_to ON replied_to.message_id = messages.id "
-                    "LEFT JOIN attachments ON attachments.message_id = messages.id "
-                    "LEFT JOIN reactions ON reactions.message_id = messages.id "
                     "WHERE channel_id = ?"
                 ),
                 (thread_id,)   
@@ -93,52 +157,27 @@ async def execute(args):
                         timestamp,
                         unsent_timestamp,
                         replied_to_id,
-                        reaction_emoji,
-                        reaction_count,
-                        attachment_name,
-                        attachment_url,
-                        attachment_width,
-                        attachment_height,
                     ) = message
 
-                    if message_id not in dump["data"][str_thread_id]:
-                        dumped_message = dump["data"][str_thread_id][message_id] = {
-                            "u": dump["meta"]["userindex"].index(str(sender_id)),
-                            "t": timestamp,
-                        }
-                    else:
-                        dumped_message = dump["data"][str_thread_id][message_id]
+                    dumped_message = dump["data"][str_thread_id][message_id] = {
+                        "u": dump["meta"]["userindex"].index(str(sender_id)),
+                        "t": timestamp,
+                    }
 
-                    if text and "m" not in dumped_message:
+                    if text:
                         dumped_message["m"] = text
                     
-                    if unsent_timestamp and "tu" not in dumped_message:
+                    if unsent_timestamp:
                         dumped_message["tu"] = unsent_timestamp
                     
-                    if replied_to_id and "r" not in dumped_message:
+                    if replied_to_id:
                         dumped_message["r"] = replied_to_id
+
+                    if (reactions := all_reactions.getall(message_id, None)):
+                        dumped_message["re"] = reactions
                     
-                    if reaction_emoji and reaction_count:
-                        if "re" not in dumped_message:
-                            dumped_message["re"] = []
-                        dumped_message["re"].append({
-                            "n": reaction_emoji,
-                            "c": reaction_count,
-                        })
-                    
-                    if attachment_name and attachment_url:
-                        if "a" not in dumped_message:
-                            dumped_message["a"] = []
-                        
-                        dumped_attachment = {
-                            "name": attachment_name,
-                            "url": attachment_url,
-                        }
-                        if attachment_height:
-                            dumped_attachment["height"] = attachment_height
-                        if attachment_width:
-                            dumped_attachment["width"] = attachment_width
-                        dumped_message["a"].append(dumped_attachment)
+                    if (attachments := all_attachments.getall(message_id, None)):
+                        dumped_message["a"] = attachments
 
     output_filename = f"archive-{int(time.time())}"            
     

@@ -541,13 +541,16 @@ async def execute(args):
             )
             await conn.commit()
 
-            async with conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE channel_id = ?",
-                (real_thread_id,)
-            ) as cursor:
-                dumped_message_count = (await cursor.fetchone())[0]
+            if args.latest:
+                dumped_message_count = 0
+            else:
+                async with conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE channel_id = ?",
+                    (real_thread_id,)
+                ) as cursor:
+                    dumped_message_count = (await cursor.fetchone())[0]
             
-            if dumped_message_count > 0 and not args.latest:
+            if dumped_message_count > 0:
                 async with conn.execute(
                     "SELECT timestamp FROM messages WHERE channel_id = ? ORDER BY timestamp ASC LIMIT 1",
                     (real_thread_id,)

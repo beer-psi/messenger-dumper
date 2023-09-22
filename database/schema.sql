@@ -1,3 +1,5 @@
+PRAGMA journal_mode=WAL;
+
 CREATE TABLE IF NOT EXISTS channels(
     id BIGINT PRIMARY KEY NOT NULL,
     `name` TEXT
