@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS messages(
 CREATE TABLE IF NOT EXISTS replied_to (
     message_id TEXT PRIMARY KEY NOT NULL,
     replied_to_id TEXT NOT NULL,
-    FOREIGN KEY (message_id) REFERENCES messages(id)
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS attachments(
@@ -34,12 +34,13 @@ CREATE TABLE IF NOT EXISTS attachments(
     `url` TEXT NOT NULL,
     width INTEGER,
     height INTEGER,
-    FOREIGN KEY (message_id) REFERENCES messages(id)
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS reactions(
     message_id TEXT NOT NULL,
     emoji TEXT NOT NULL,
     count INTEGER,
-    FOREIGN KEY (message_id) REFERENCES messages(id)
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    UNIQUE(message_id, emoji)
 );

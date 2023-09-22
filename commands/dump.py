@@ -337,9 +337,7 @@ async def convert_message(
     webhook_urls: list[str],
 ) -> dict[str, Any]:
     msg_text = ""
-    if message.unsent_timestamp:
-        msg_text = "*Unsent*"
-    elif message.message:
+    if message.message:
         msg_text = utf16_surrogate.add(message.message.text)
         for m in reversed(message.message.ranges):
             offset = m.offset
@@ -450,6 +448,9 @@ async def convert_message(
 
 
 async def execute(args):
+    if len(args.webhook) == 0:
+        print("[WARN] Webhooks were not provided. Not uploading attachments.")
+
     schema_path = os.path.join(
         os.path.dirname(
             os.path.dirname(__file__)
@@ -577,21 +578,35 @@ async def execute(args):
                 while True:
                     result = await queue.get()
                     
+                    # not updating existing users, since MinimalParticipants are less
+                    # complete.
                     await conn.executemany(
-                        "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                        (
+                            "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) "
+                            "ON CONFLICT DO NOTHING"
+                        ),
                         result["users"],
                     )
                     await conn.execute(
                         (
                             "INSERT INTO messages(id, sender_id, channel_id, text, timestamp, unsent_timestamp) "
-                            "VALUES (?, ?, ?, ?, ? ,?) ON CONFLICT DO NOTHING"
+                            "VALUES (?, ?, ?, ?, ? ,?) "
+                            "ON CONFLICT DO UPDATE SET "
+                            "    sender_id=coalesce(excluded.sender_id, sender_id),"
+                            "    channel_id=coalesce(excluded.channel_id, channel_id),"
+                            "    text=coalesce(excluded.text, text),"
+                            "    timestamp=coalesce(excluded.timestamp, timestamp),"
+                            "    unsent_timestamp=coalesce(excluded.unsent_timestamp, unsent_timestamp)"
                         ),
                         result["message"],
                     )
                     
                     if "replied_to" in result:
                         await conn.execute(
-                            "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                            (
+                                "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?)"
+                                "ON CONFLICT DO UPDATE SET replied_to_id=coalesce(excluded.replied_to_id, replied_to_id)"
+                            ),
                             result["replied_to"],
                         )
                     
@@ -606,7 +621,10 @@ async def execute(args):
                     
                     if "reactions" in result:
                         await conn.executemany(
-                            "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                            (
+                                "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) "
+                                "ON CONFLICT (message_id, emoji) DO UPDATE SET count=excluded.count"
+                            ),
                             result["reactions"]
                         )  
 
