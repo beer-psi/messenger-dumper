@@ -3,9 +3,9 @@ import datetime
 import getpass
 import hashlib
 import hmac
-import mimetypes
 import itertools
 import json
+import mimetypes
 import os
 import random
 import re
@@ -15,13 +15,18 @@ from typing import Any, Optional
 
 import aiohttp
 import aiosqlite
-from aiohttp.client_exceptions import ContentTypeError, ClientPayloadError, ClientOSError
-from maufbapi import AndroidAPI, AndroidState
-from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
-from maufbapi.types.graphql import Message, MinimalSticker, Attachment, AttachmentType
+from aiohttp.client_exceptions import (
+    ClientOSError,
+    ClientPayloadError,
+    ContentTypeError,
+)
 from mautrix.util import utf16_surrogate
 from mautrix.util.proxy import ProxyHandler
 from tqdm import tqdm
+
+from maufbapi import AndroidAPI, AndroidState
+from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
+from maufbapi.types.graphql import Attachment, AttachmentType, Message, MinimalSticker
 
 
 def add_command(subparsers):
@@ -189,7 +194,7 @@ async def reupload_fb_file(
     filename: str,
     webhook_url: str,
     *,
-    referer: str = "messenger_thread_photo"
+    referer: str = "unknown"
 ) -> None | tuple[str, str]:
     def parse_ratelimit_header(request: Any, *, use_clock: bool = False) -> float:
         reset: Optional[str] = request.headers.get("X-Ratelimit-Reset")
@@ -205,9 +210,9 @@ async def reupload_fb_file(
         else:
             return float(reset_after)
         
-    backoff = 1
+    attempts = 0
     while True:
-        if backoff > 10:
+        if attempts > 10:
             print(f"[ERROR] Could not download attachment {filename} with URL {url}")
             return None
 
@@ -224,8 +229,8 @@ async def reupload_fb_file(
                 attachment_data = await resp.read()
                 break
         except (ClientPayloadError, ClientOSError, asyncio.TimeoutError):
-            await asyncio.sleep(backoff)
-            backoff += 1
+            await asyncio.sleep(2 ** attempts)  # exponential backoff
+            attempts += 1
             continue
 
     form_data = aiohttp.FormData(quote_fields=False)
@@ -279,7 +284,13 @@ async def convert_sticker(
         extension = "png"
     url = image.uri
 
-    reuploaded_url = await reupload_fb_file(client, url, f"sticker-{sticker.id}.{extension}", webhook_url)
+    reuploaded_url = await reupload_fb_file(
+        client,
+        url,
+        f"sticker-{sticker.id}.{extension}",
+        webhook_url,
+        referer=""
+    )
     return {
         "url": reuploaded_url[1],
         "name": reuploaded_url[0],
@@ -297,6 +308,7 @@ async def convert_attachment(
     message_id: str,
 ) -> dict[str, Any] | None:
     filename = attachment.filename
+    referer = "unknown"
     if attachment.mimetype and "." not in filename:
         filename += mimetypes.guess_extension(attachment.mimetype)
 
@@ -314,6 +326,7 @@ async def convert_attachment(
         url = full_screen.uri
         if (width, height) > full_screen.dimensions:
             url = await client.get_image_url(message_id, attachment.attachment_fbid) or url
+        referer = "messenger_thread_photo"
     elif attachment.typename == AttachmentType.AUDIO:
         url = attachment.playable_url
         attachment_type = "audioclip"
@@ -327,7 +340,13 @@ async def convert_attachment(
         print(f"[WARN] Unsupported attachment type {attachment.typename}")
         return None
 
-    reuploaded_url = await reupload_fb_file(client, url, filename, webhook_url)
+    reuploaded_url = await reupload_fb_file(
+        client,
+        url,
+        filename,
+        webhook_url,
+        referer=referer
+    )
     return {
         "url": reuploaded_url[1],
         "name": reuploaded_url[0],
@@ -336,64 +355,82 @@ async def convert_attachment(
     } if reuploaded_url else None
     
 
-async def convert_message(
+async def db_worker(
+    queue: asyncio.Queue,
+    conn: aiosqlite.Connection,
+    pbar: tqdm,
+):
+    while True:
+        result = await queue.get()
+        
+        if "users" in result:
+            # Not updating existing users, since MinimalParticipants are less
+            # complete.
+            await conn.executemany(
+                (
+                    "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                result["users"],
+            )
+        if "message" in result:
+            # It's very likely that the new version of the message has the same data
+            # or less (if it was unsent), since Messenger doesn't allow editing
+            # messages.
+            await conn.execute(
+                (
+                    "INSERT INTO messages(id, sender_id, channel_id, text, timestamp, unsent_timestamp) "
+                    "VALUES (?, ?, ?, ?, ? ,?) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                result["message"],
+            )
+        if "replied_to" in result:
+            # Same reason why messages are not updated; you can't switch what a message
+            # is replying to.
+            await conn.execute(
+                (
+                    "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?)"
+                    "ON CONFLICT DO NOTHING"
+                ),
+                result["replied_to"],
+            )
+        if "attachments" in result:
+            await conn.executemany(
+                (
+                    "INSERT INTO attachments(id, message_id, name, type, url, width, height) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                result["attachments"],
+            )
+        if "reactions" in result:
+            await conn.executemany(
+                (
+                    "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) "
+                    "ON CONFLICT (message_id, emoji) DO UPDATE SET count=excluded.count"
+                ),
+                result["reactions"]
+            )  
+
+        await conn.commit()
+        if "message" in result:
+            pbar.update(1)
+        queue.task_done()
+
+
+async def attachment_worker(
+    queue: asyncio.Queue,
+    db_queue: asyncio.Queue,
     client: AndroidAPI,
-    message: Message,
-    *,
     thread_id: str | int,
     webhook_urls: list[str],
-) -> dict[str, Any]:
-    msg_text = ""
-    if message.message:
-        msg_text = utf16_surrogate.add(message.message.text)
-        for m in reversed(message.message.ranges):
-            offset = m.offset
-            leng = m.length
-            if not m.entity or not m.entity.id:
-                continue
-            msg_text = f"{msg_text[:offset]}<@{m.entity.id}>{msg_text[offset + leng:]}"
-        msg_text = escape_markdown(utf16_surrogate.remove(msg_text))
+    attachment_pbar: tqdm,
+):
+    while True:
+        message: Message = await queue.get()
+        result = {}
 
-    result = {
-        "users": [
-            (
-                message.message_sender.id,
-                message.message_sender.messaging_actor.name or "Facebook user",
-                ""
-            )
-        ],
-        "message": (
-            message.message_id,
-            message.message_sender.id,
-            int(thread_id),
-            msg_text,
-            message.timestamp,
-            message.unsent_timestamp,
-        ),
-    }
-
-    if (
-        message.replied_to_message 
-        and message.replied_to_message.message
-        and (replied_to_id := message.replied_to_message.message.message_id)
-    ):
-        result["replied_to"] = (message.message_id, replied_to_id)
-    
-    if len(message.message_reactions) > 0:
-        reactions_grouped_by_emoji = itertools.groupby(
-            message.message_reactions,
-            lambda x: x.reaction
-        )
-        result["reactions"] = [
-            (
-                message.message_id,
-                reaction,
-                len(list(group)),
-            )
-            for reaction, group in reactions_grouped_by_emoji
-        ]
-    
-    if len(webhook_urls) > 0:
         if message.sticker:
             if "attachments" not in result:
                 result["attachments"] = []
@@ -450,7 +487,71 @@ async def convert_message(
                         None,
                     )
                 )
-            
+
+        db_queue.put_nowait(result)
+        attachment_pbar.update(len(result.get("attachments", [])))
+        queue.task_done()
+
+
+def convert_message(
+    message: Message,
+    *,
+    thread_id: str | int,
+    attachment_queue: Optional[asyncio.Queue] = None,
+) -> dict[str, Any]:
+    msg_text = ""
+    if message.message:
+        msg_text = utf16_surrogate.add(message.message.text)
+        for m in reversed(message.message.ranges):
+            offset = m.offset
+            leng = m.length
+            if not m.entity or not m.entity.id:
+                continue
+            msg_text = f"{msg_text[:offset]}<@{m.entity.id}>{msg_text[offset + leng:]}"
+        msg_text = escape_markdown(utf16_surrogate.remove(msg_text))
+
+    result = {
+        "users": [
+            (
+                message.message_sender.id,
+                message.message_sender.messaging_actor.name or "Facebook user",
+                ""
+            )
+        ],
+        "message": (
+            message.message_id,
+            message.message_sender.id,
+            int(thread_id),
+            msg_text,
+            message.timestamp,
+            message.unsent_timestamp,
+        ),
+    }
+
+    if (
+        message.replied_to_message 
+        and message.replied_to_message.message
+        and (replied_to_id := message.replied_to_message.message.message_id)
+    ):
+        result["replied_to"] = (message.message_id, replied_to_id)
+    
+    if len(message.message_reactions) > 0:
+        reactions_grouped_by_emoji = itertools.groupby(
+            message.message_reactions,
+            lambda x: x.reaction
+        )
+        result["reactions"] = [
+            (
+                message.message_id,
+                reaction,
+                len(list(group)),
+            )
+            for reaction, group in reactions_grouped_by_emoji
+        ]
+    
+    if attachment_queue:
+        attachment_queue.put_nowait(message)
+
     return result
 
 
@@ -566,90 +667,47 @@ async def execute(args):
             print(f"[INFO] Fetching messages for {info.name} ({real_thread_id})")
             backfill_more = True
             
-            semaphore = asyncio.Semaphore(10)
-            async def rate_limited_message_task(
-                message: Message,
-                queue: asyncio.Queue,
-            ):
-                async with semaphore:
-                    result = await convert_message(
-                        api,
-                        message,
-                        thread_id=real_thread_id,
-                        webhook_urls=args.webhook,
-                    )  
-                    return queue.put_nowait(result)
-            
-            async def db_worker(
-                conn: aiosqlite.Connection,
-                queue: asyncio.Queue,
-                pbar: tqdm,
-            ):
-                while True:
-                    result = await queue.get()
-                    
-                    # not updating existing users, since MinimalParticipants are less
-                    # complete.
-                    await conn.executemany(
-                        (
-                            "INSERT INTO users(id, name, avatar_url) VALUES (?, ?, ?) "
-                            "ON CONFLICT DO NOTHING"
-                        ),
-                        result["users"],
-                    )
-                    await conn.execute(
-                        (
-                            "INSERT INTO messages(id, sender_id, channel_id, text, timestamp, unsent_timestamp) "
-                            "VALUES (?, ?, ?, ?, ? ,?) "
-                            "ON CONFLICT DO UPDATE SET "
-                            "    sender_id=coalesce(excluded.sender_id, sender_id),"
-                            "    channel_id=coalesce(excluded.channel_id, channel_id),"
-                            "    text=coalesce(excluded.text, text),"
-                            "    timestamp=coalesce(excluded.timestamp, timestamp),"
-                            "    unsent_timestamp=coalesce(excluded.unsent_timestamp, unsent_timestamp)"
-                        ),
-                        result["message"],
-                    )
-                    
-                    if "replied_to" in result:
-                        await conn.execute(
-                            (
-                                "INSERT INTO replied_to(message_id, replied_to_id) VALUES (?, ?)"
-                                "ON CONFLICT DO UPDATE SET replied_to_id=coalesce(excluded.replied_to_id, replied_to_id)"
-                            ),
-                            result["replied_to"],
-                        )
-                    
-                    if "attachments" in result:
-                        await conn.executemany(
-                            (
-                                "INSERT INTO attachments(id, message_id, name, type, url, width, height) VALUES(?, ?, ?, ?, ?, ?, ?) "
-                                "ON CONFLICT DO NOTHING"
-                            ),
-                            result["attachments"],
-                        )
-                    
-                    if "reactions" in result:
-                        await conn.executemany(
-                            (
-                                "INSERT INTO reactions(message_id, emoji, count) VALUES (?, ?, ?) "
-                                "ON CONFLICT (message_id, emoji) DO UPDATE SET count=excluded.count"
-                            ),
-                            result["reactions"]
-                        )  
-
-                    await conn.commit()
-                    pbar.update(1)
-                    queue.task_done()
-            
-            pbar = tqdm(total=info.messages_count - dumped_message_count)
+            message_pbar = tqdm(
+                total=info.messages_count - dumped_message_count,
+                position=0,
+                unit="messages",
+            )
             db_queue = asyncio.Queue()
-            db_task = asyncio.create_task(db_worker(conn, db_queue, pbar))
+            tasks = [
+                asyncio.create_task(db_worker(db_queue, conn, message_pbar)),
+            ]
+
+            if len(args.webhook) > 0:
+                attachment_pbar = tqdm(
+                    total=1,
+                    position=1,
+                    unit="attachments"
+                )
+                attachment_queue = asyncio.Queue()
+                tasks.extend(
+                    asyncio.create_task(
+                        attachment_worker(
+                            attachment_queue,
+                            db_queue,
+                            api,
+                            real_thread_id,
+                            args.webhook,
+                            attachment_pbar,
+                        )
+                    )
+                )
+            else:
+                attachment_pbar = None
+                attachment_queue = None
 
             while backfill_more:
                 tasks = []
                 try:
-                    resp = await api.fetch_messages(thread_id, before_time_ms, msg_count=95)
+                    resp = await api.fetch_messages(
+                        thread_id,
+                        before_time_ms,
+                        msg_count=95
+                    )
                     messages = resp.nodes
                 except RateLimitExceeded:
                     print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
@@ -661,18 +719,27 @@ async def execute(args):
                     backfill_more = False
                     break
 
-                tasks = [
-                    rate_limited_message_task(message, db_queue)
-                    for message in messages
-                ]
-
-                await asyncio.gather(*tasks)
+                for message in messages:
+                    if attachment_pbar:
+                        if message.sticker:
+                            attachment_pbar.total += 1
+                        attachment_pbar.total += len(message.blob_attachments)
+                        attachment_pbar.refresh()
+                    
+                    result = convert_message(
+                        message,
+                        thread_id=real_thread_id,
+                        attachment_queue=attachment_queue,
+                    )
+                    
+                    db_queue.put_nowait(result)
                 
                 before_time_ms = messages[0].timestamp - 1
             
+            if attachment_queue:
+                await attachment_queue.join()
             await db_queue.join()
-            db_task.cancel()
-            try:
-                await db_task
-            except asyncio.CancelledError:
-                pass
+
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)

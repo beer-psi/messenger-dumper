@@ -1,6 +1,5 @@
 import json
 import os
-import datetime
 
 import aiosqlite
 
