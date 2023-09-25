@@ -704,7 +704,7 @@ async def execute(args):
                             attachment_pbar,
                         )
                     )
-                    for _ in range(max((os.cpu_count() or 3) - 1, 2) / 2)
+                    for _ in range(max((os.cpu_count() or 3) - 1, 2) // 2)
                 )
             else:
                 fetched_attachment_ids = []
