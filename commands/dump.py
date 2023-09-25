@@ -25,7 +25,7 @@ from mautrix.util.proxy import ProxyHandler
 from tqdm import tqdm
 
 from maufbapi import AndroidAPI, AndroidState
-from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
+from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError, ResponseError
 from maufbapi.types.graphql import (
     Attachment,
     AttachmentType,
@@ -728,6 +728,17 @@ async def execute(args):
                         msg_count=95
                     )
                 except RateLimitExceeded as _:
+                    print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
+                    await asyncio.sleep(300)
+                    continue
+                except ResponseError as e:
+                    code = e.data.get("code", "")
+                    subcode = e.data.get("subcode") or e.data.get("error_subcode")
+                    code_str = f"{code}.{subcode}" if subcode else str(code)
+
+                    if code_str != "1675004":  # Rate limit exceeded
+                        raise
+
                     print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
                     await asyncio.sleep(300)
                     continue
