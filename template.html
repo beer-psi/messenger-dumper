@@ -75,6 +75,8 @@ const DISCORD = (function() {
 	let templateAttachmentDownload;
 	let templateEmbedImage;
 	let templateEmbedImageWithSize;
+	let templateEmbedVideo;
+	let templateEmbedVideoWithSize;
 	let templateEmbedRich;
 	let templateEmbedRichNoDescription;
 	let templateEmbedUrl;
@@ -131,6 +133,12 @@ const DISCORD = (function() {
 		const ext = dot === -1 ? "" : url.pathname.substring(dot).toLowerCase();
 		return ext === ".png" || ext === ".gif" || ext === ".jpg" || ext === ".jpeg";
 	};
+
+	const isVideoUrl = function(url) {
+		const dot = url.pathname.lastIndexOf(".");
+		const ext = dot === -1 ? "" : url.pathname.substring(dot).toLowerCase();
+		return ext === ".mp4" || ext === ".webm" || ext === ".3gp";
+	}
 	
 	return {
 		setup() {
@@ -189,6 +197,16 @@ const DISCORD = (function() {
 			templateEmbedImageWithSize = new TEMPLATE([
 				"<a href='{url}' class='embed thumbnail loading'><img src='{src}' width='{width}' height='{height}' alt='' onload='DISCORD.handleImageLoad(this)' onerror='DISCORD.handleImageLoadError(this)'></a><br>"
 			].join(""));
+
+			// noinspection HtmlUnknownTarget
+			templateEmbedVideo = new TEMPLATE([
+				"<div class='embed'><video controls preload='metadata' src='{src}' onerror='DISCORD.handleVideoLoadError(this)'></video></div>"
+			].join(""))
+
+			// noinspection HtmlUnknownTarget
+			templateEmbedVideoWithSize = new TEMPLATE([
+				"<div class='embed'><video controls preload='metadata' src='{src}' width='{width}' height='{height}' onerror='DISCORD.handleVideoLoadError(this)'></video></div>"
+			].join(""))
 			
 			// noinspection HtmlUnknownTarget
 			templateEmbedRich = new TEMPLATE([
@@ -232,6 +250,17 @@ const DISCORD = (function() {
 		isImageAttachment(attachment) {
 			const url = DOM.tryParseUrl(attachment.url);
 			return url != null && isImageUrl(url);
+		},
+
+		handleVideoLoadError(ele) {
+			// noinspection JSUnusedGlobalSymbols
+			ele.onload = null;
+			ele.setAttribute("alt", "(video attachment not found/unplayable)");
+		},
+
+		isVideoAttachment(attachment) {
+			const url = DOM.tryParseUrl(attachment.url);
+			return url != null && isVideoUrl(url);
 		},
 		
 		getChannelHTML(channel) { // noinspection FunctionWithInconsistentReturnsJS
@@ -288,14 +317,23 @@ const DISCORD = (function() {
 					}
 					
 					return value.map(attachment => {
-						if (!DISCORD.isImageAttachment(attachment) || !SETTINGS.enableImagePreviews) {
+						const isImageAttachment = DISCORD.isImageAttachment(attachment);
+						const isVideoAttachment = DISCORD.isVideoAttachment(attachment);
+						const isEmbeddableAttachment = isImageAttachment || isVideoAttachment;
+
+						if (!SETTINGS.enableImagePreviews || !isEmbeddableAttachment) {
 							return templateAttachmentDownload.apply(attachment);
-						}
-						else if ("width" in attachment && "height" in attachment) {
-							return templateEmbedImageWithSize.apply({ url: attachment.url, src: attachment.url, width: attachment.width, height: attachment.height });
+						} else if ("width" in attachment && "height" in attachment) {
+							const args = { url: attachment.url, src: attachment.url, width: attachment.width, height: attachment.height };
+							return isImageAttachment 
+								? templateEmbedImageWithSize.apply(args)
+								: templateEmbedVideoWithSize.apply(args);
 						}
 						else {
-							return templateEmbedImage.apply({ url: attachment.url, src: attachment.url });
+							const args = { url: attachment.url, src: attachment.url };
+							return isImageAttachment
+								? templateEmbedImage.apply(args)
+								: templateEmbedVideo.apply(args);
 						}
 					}).join("");
 				}
@@ -440,7 +478,7 @@ const GUI = (function() {
 	
 	const showSettingsModal = function() {
 		showModal(560, `
-<label><input id='dht-cfg-imgpreviews' type='checkbox'> Image Previews</label><br>
+<label><input id='dht-cfg-imgpreviews' type='checkbox'> Media Previews</label><br>
 <label><input id='dht-cfg-formatting' type='checkbox'> Message Formatting</label><br>
 <label><input id='dht-cfg-useravatars' type='checkbox'> User Avatars</label><br>
 <label><input id='dht-cfg-animemoji' type='checkbox'> Animated Emoji</label><br>`);
@@ -673,8 +711,8 @@ PROCESSOR.FILTER = {
 	byTime: ((timeStart, timeEnd) => message => message.t >= timeStart && message.t <= timeEnd),
 	byContents: ((substr) => message => ("m" in message ? message.m : "").indexOf(substr) !== -1),
 	byRegex: ((regex) => message => regex.test("m" in message ? message.m : "")),
-	withImages: (() => message => (message.e && message.e.some(embed => embed.type === "image")) || (message.a && message.a.some(DISCORD.isImageAttachment))),
-	withDownloads: (() => message => message.a && message.a.some(attachment => !DISCORD.isImageAttachment(attachment))),
+	withImages: (() => message => (message.e && message.e.some(embed => embed.type === "image")) || (message.a && (message.a.some(DISCORD.isImageAttachment) || message.a.some(DISCORD.isVideoAttachment)))),
+	withDownloads: (() => message => message.a && message.a.some(attachment => !DISCORD.isImageAttachment(attachment) && !DISCORD.isVideoAttachment(attachment))),
 	withEmbeds: (() => message => message.e && message.e.length > 0),
 	withAttachments: (() => message => message.a && message.a.length > 0),
 	isEdited: (() => message => ("te" in message) ? message.te : (message.f & 1) === 1),
@@ -1769,7 +1807,7 @@ body {
           <option value="">No filter&nbsp;</option>
           <option value="user">Filter messages by user&nbsp;</option>
           <option value="contents">Filter messages by contents&nbsp;</option>
-          <option value="withimages">Only messages with images&nbsp;</option>
+          <option value="withimages">Only messages with media&nbsp;</option>
           <option value="withdownloads">Only messages with downloads&nbsp;</option>
           <!-- <option value="edited">Only edited messages&nbsp;</option> -->
 		  <option value="unsent">Only unsent messages</option>
