@@ -26,7 +26,13 @@ from tqdm import tqdm
 
 from maufbapi import AndroidAPI, AndroidState
 from maufbapi.http.errors import RateLimitExceeded, ResponseTypeError
-from maufbapi.types.graphql import Attachment, AttachmentType, Message, MinimalSticker
+from maufbapi.types.graphql import (
+    Attachment,
+    AttachmentType,
+    Message,
+    MinimalSticker,
+    ParticipantNode,
+)
 
 
 def add_command(subparsers):
@@ -425,13 +431,14 @@ async def attachment_worker(
     client: AndroidAPI,
     thread_id: str | int,
     webhook_urls: list[str],
+    fetched_attachment_ids: list[str],
     attachment_pbar: tqdm,
 ):
     while True:
         message: Message = await queue.get()
         result = {}
 
-        if message.sticker:
+        if message.sticker and message.sticker.id not in fetched_attachment_ids:
             if "attachments" not in result:
                 result["attachments"] = []
 
@@ -467,6 +474,7 @@ async def attachment_worker(
                         message_id=message.message_id,
                     )
                     for attachment in message.blob_attachments
+                    if attachment.id not in fetched_attachment_ids
                 ]
             )
             for attachment in attachments:
@@ -497,7 +505,6 @@ def convert_message(
     message: Message,
     *,
     thread_id: str | int,
-    attachment_queue: Optional[asyncio.Queue] = None,
 ) -> dict[str, Any]:
     msg_text = ""
     if message.message:
@@ -548,9 +555,6 @@ def convert_message(
             )
             for reaction, group in reactions_grouped_by_emoji
         ]
-    
-    if attachment_queue:
-        attachment_queue.put_nowait(message)
 
     return result
 
@@ -602,7 +606,7 @@ async def execute(args):
             await conn.commit()
 
             print(f"[INFO] Fetching users for thread {info.name} ({real_thread_id})")
-            async def user_data_worker(pcp):
+            async def user_data_worker(pcp: ParticipantNode):
                 actor = pcp.messaging_actor
                 name = (
                     actor.structured_name.text 
@@ -642,33 +646,30 @@ async def execute(args):
             )
             await conn.commit()
 
-            if args.latest:
-                dumped_message_count = 0
-            else:
-                async with conn.execute(
-                    "SELECT COUNT(*) FROM messages WHERE channel_id = ?",
-                    (real_thread_id,)
-                ) as cursor:
-                    dumped_message_count = (await cursor.fetchone())[0]
+            fetched_message_ids = []
+            fetched_message_count = 0
+            async with conn.execute(
+                "SELECT id FROM messages WHERE channel_id = ?",
+                (real_thread_id,)
+            ) as cursor:
+                async for row in cursor:
+                    fetched_message_ids.append(row[0])
+                    fetched_message_count += 1
             
-            if dumped_message_count > 0:
-                async with conn.execute(
-                    "SELECT timestamp FROM messages WHERE channel_id = ? ORDER BY timestamp ASC LIMIT 1",
-                    (real_thread_id,)
-                ) as cursor:
-                    earliest_timestamp = (await cursor.fetchone())[0]
-                    before_time_ms = earliest_timestamp
-                    print(f"[INFO] Continuing from timestamp {before_time_ms}")
-            else:
-                before_time_ms = int(time.time() * 1000)
-                print("[INFO] Starting from newest message")
-                
-
-            print(f"[INFO] Fetching messages for {info.name} ({real_thread_id})")
-            backfill_more = True
+            # if dumped_message_count > 0:
+            #     async with conn.execute(
+            #         "SELECT timestamp FROM messages WHERE channel_id = ? ORDER BY timestamp ASC LIMIT 1",
+            #         (real_thread_id,)
+            #     ) as cursor:
+            #         earliest_timestamp = (await cursor.fetchone())[0]
+            #         before_time_ms = earliest_timestamp
+            #         print(f"[INFO] Continuing from timestamp {before_time_ms}")
+            # else:
+            #     before_time_ms = int(time.time() * 1000)
+            #     print("[INFO] Starting from newest message")
             
             message_pbar = tqdm(
-                total=info.messages_count - dumped_message_count,
+                total=info.messages_count - fetched_message_count,
                 position=0,
                 unit="messages",
             )
@@ -678,13 +679,20 @@ async def execute(args):
             ]
 
             if len(args.webhook) > 0:
+                fetched_attachment_ids = []
+                async with conn.execute(
+                    "SELECT id FROM attachments"
+                ) as cursor:
+                    async for row in cursor:
+                        fetched_attachment_ids.append(row[0])
+
                 attachment_pbar = tqdm(
                     total=1,
                     position=1,
                     unit="attachments"
                 )
                 attachment_queue = asyncio.Queue()
-                tasks.extend(
+                tasks.append(
                     asyncio.create_task(
                         attachment_worker(
                             attachment_queue,
@@ -692,13 +700,19 @@ async def execute(args):
                             api,
                             real_thread_id,
                             args.webhook,
+                            fetched_attachment_ids,
                             attachment_pbar,
                         )
                     )
                 )
             else:
+                fetched_attachment_ids = []
                 attachment_pbar = None
                 attachment_queue = None
+            
+            print(f"[INFO] Fetching messages for {info.name} ({real_thread_id})")
+            backfill_more = True
+            before_time_ms = int(time.time() * 1000)
 
             while backfill_more:
                 tasks = []
@@ -715,24 +729,28 @@ async def execute(args):
                     continue
                 
                 if len(messages) == 0 or not messages:
-                    print("[INFO] Nothing left to fetch.")
                     backfill_more = False
                     break
 
                 for message in messages:
                     if attachment_pbar:
-                        if message.sticker:
-                            attachment_pbar.total += 1
-                        attachment_pbar.total += len(message.blob_attachments)
+                        attachments = [message.sticker, *message.blob_attachments]
+                        
+                        for x in attachments:
+                            if x and x.id not in fetched_attachment_ids:
+                                attachment_pbar.total += 1
+
                         attachment_pbar.refresh()
                     
-                    result = convert_message(
-                        message,
-                        thread_id=real_thread_id,
-                        attachment_queue=attachment_queue,
-                    )
-                    
-                    db_queue.put_nowait(result)
+                    if message.message_id not in fetched_message_ids:
+                        result = convert_message(
+                            message,
+                            thread_id=real_thread_id,
+                        )
+                        db_queue.put_nowait(result)
+
+                    if attachment_queue:
+                        attachment_queue.put_nowait(message)
                 
                 before_time_ms = messages[0].timestamp - 1
             
