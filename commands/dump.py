@@ -516,6 +516,8 @@ def convert_message(
                 continue
             msg_text = f"{msg_text[:offset]}<@{m.entity.id}>{msg_text[offset + leng:]}"
         msg_text = escape_markdown(utf16_surrogate.remove(msg_text))
+    elif message.snippet:
+        msg_text = message.snippet
 
     result = {
         "users": [
