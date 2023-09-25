@@ -511,7 +511,7 @@ def convert_message(
     if not message.is_user_generated:
         # System messages don't have message text, they only have
         # a snippet to describe what was going on.
-        msg_text = message.snippet
+        msg_text = f"*{message.snippet}*"
     elif message.message:
         msg_text = utf16_surrogate.add(message.message.text)
         for m in reversed(message.message.ranges):
