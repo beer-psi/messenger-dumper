@@ -692,7 +692,7 @@ async def execute(args):
                     unit="attachments"
                 )
                 attachment_queue = asyncio.Queue()
-                tasks.append(
+                tasks.extend(
                     asyncio.create_task(
                         attachment_worker(
                             attachment_queue,
@@ -704,6 +704,7 @@ async def execute(args):
                             attachment_pbar,
                         )
                     )
+                    for _ in range(max((os.cpu_count() or 3) - 1, 2) / 2)
                 )
             else:
                 fetched_attachment_ids = []
