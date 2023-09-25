@@ -721,18 +721,18 @@ async def execute(args):
             before_time_ms = int(time.time() * 1000)
 
             while backfill_more:
-                tasks = []
                 try:
                     resp = await api.fetch_messages(
                         thread_id,
                         before_time_ms,
                         msg_count=95
                     )
-                    messages = resp.nodes
-                except RateLimitExceeded:
+                except RateLimitExceeded as _:
                     print("[WARN] Rate limited. Waiting for 300 seconds before resuming.")
                     await asyncio.sleep(300)
                     continue
+            
+                messages = resp.nodes
                 
                 if len(messages) == 0 or not messages:
                     backfill_more = False
