@@ -152,8 +152,8 @@ async def get_credentials(credentials_filename) -> tuple[AndroidState, AndroidAP
         state.carrier.name = "Verizon"
         state.carrier.hni = 311390
         seed = hmac.new(
-            key=uuid.uuid4().encode("utf-8"),
-            msg=uuid.uuid4().encode("utf-8"),
+            key=str(uuid.uuid4()).encode("utf-8"),
+            msg=str(uuid.uuid4()).encode("utf-8"),
             digestmod=hashlib.sha256,
         ).digest()
         state.generate(seed)
