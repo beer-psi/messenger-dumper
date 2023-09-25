@@ -507,7 +507,12 @@ def convert_message(
     thread_id: str | int,
 ) -> dict[str, Any]:
     msg_text = ""
-    if message.message:
+
+    if not message.is_user_generated:
+        # System messages don't have message text, they only have
+        # a snippet to describe what was going on.
+        msg_text = message.snippet
+    elif message.message:
         msg_text = utf16_surrogate.add(message.message.text)
         for m in reversed(message.message.ranges):
             offset = m.offset
@@ -516,8 +521,6 @@ def convert_message(
                 continue
             msg_text = f"{msg_text[:offset]}<@{m.entity.id}>{msg_text[offset + leng:]}"
         msg_text = escape_markdown(utf16_surrogate.remove(msg_text))
-    elif message.snippet:
-        msg_text = message.snippet
 
     result = {
         "users": [
