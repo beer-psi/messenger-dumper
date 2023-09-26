@@ -38,12 +38,17 @@
 		GUI.scrollMessagesToTop();
 	});
 	
-	try {
-		STATE.uploadFile(JSON.parse(window.DHT_EMBEDDED));
-	} catch (e) {
-		console.error(e);
-		alert("Could not parse embedded file, see console for details.");
-	}
+	fetch(window.DHT_EMBEDDED)
+		.then((r) => r.blob())
+		.then((blob) => {
+			const decompressedStream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
+			return new Response(decompressedStream).json();
+		})
+		.then((data) => STATE.uploadFile(data))
+		.catch((e) => {
+			console.error(e);
+			alert("Could not parse embedded file, see console for details.");
+		});
 });
 
 const DISCORD = (function() {

@@ -1,6 +1,8 @@
+import base64
 import json
 import os
 import time
+import gzip
 
 import aiosqlite
 from multidict import MultiDict
@@ -189,15 +191,17 @@ async def execute(args):
     with open("template.html") as f:
         template = f.read()
     
-    template = template.replace(
-        '"/*[ARCHIVE]*/"',
+    compressed_data = gzip.compress(
         json.dumps(
-            json.dumps(
-                dump,
-                ensure_ascii=False
-            ),
+            dump,
             ensure_ascii=False
         )
+        .encode("utf-8")
+    )
+    
+    template = template.replace(
+        '"/*[ARCHIVE]*/"',
+        f'"data:application/gzip;base64,{base64.b64encode(compressed_data).decode("utf-8")}"',
     )
 
     with open(f"{output_filename}.html", "w") as f:
