@@ -9,7 +9,7 @@ idna==3.4
 mautrix==0.20.2
 multidict==6.0.4
 paho-mqtt==1.6.1
-pycryptodome==3.19.0
+pycryptodome==3.19.1
 python-magic==0.4.27
 yarl==1.9.2
 zstandard==0.21.0
